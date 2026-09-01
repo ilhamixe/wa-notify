@@ -11,7 +11,7 @@
  * jadi SATU pesan. Satu produk bisa punya lebih dari satu supplier aktif →
  * semuanya dikirimi.
  */
-import db, { supplierQueries, outboxQueries, notifyLogQueries, settings } from "./db.js";
+import db, { supplierQueries, mappingQueries, outboxQueries, notifyLogQueries, settings } from "./db.js";
 import * as tpl from "./templates.js";
 
 /**
@@ -24,9 +24,9 @@ export function groupBySupplier(items) {
   const unmapped = [];
 
   for (const item of items) {
-    let matches = item.productId ? supplierQueries.activeByMap.all("product", item.productId) : [];
+    let matches = item.productId ? mappingQueries.activeByMap.all("product", item.productId) : [];
     if (!matches.length && item.category) {
-      matches = supplierQueries.activeByMap.all("category", item.category);
+      matches = mappingQueries.activeByMap.all("category", item.category);
     }
 
     if (!matches.length) {
@@ -34,7 +34,13 @@ export function groupBySupplier(items) {
       continue;
     }
 
-    for (const supplier of matches) {
+    for (const row of matches) {
+      // Build a consistent supplier-like object from the joined row
+      const supplier = {
+        id: row.supplier_id,
+        name: row.supplier_name,
+        phone: row.supplier_phone,
+      };
       const entry = groups.get(supplier.id) || { supplier, items: [] };
       entry.items.push(item);
       groups.set(supplier.id, entry);

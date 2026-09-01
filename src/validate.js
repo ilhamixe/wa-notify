@@ -59,21 +59,30 @@ export function normalizeRefId(raw) {
   return s.slice(0, 60);
 }
 
-/** Validasi payload supplier dari dashboard admin. */
+/**
+ * Validasi payload supplier dari dashboard admin.
+ * Sekarang menerima array mappings: [{mapping_type, ref_id}]
+ */
 export function parseSupplier(body) {
   const name = str(body?.name, "Nama supplier", { max: 60, min: 2 });
   const phone = normalizePhone(body?.phone);
   if (!phone) throw new ValidationError("Nomor WhatsApp supplier tidak valid. Contoh: 081234567890");
 
-  const mapping_type = String(body?.mapping_type ?? "").trim();
-  if (mapping_type !== "product" && mapping_type !== "category") {
-    throw new ValidationError('mapping_type harus "product" atau "category".');
+  if (!Array.isArray(body?.mappings) || body.mappings.length === 0) {
+    throw new ValidationError("Minimal satu mapping produk/kategori wajib dipilih.");
   }
 
-  const ref_id = normalizeRefId(body?.ref_id);
-  if (!ref_id) throw new ValidationError("Produk / kategori target wajib dipilih.");
+  const mappings = body.mappings.map((m, i) => {
+    const mapping_type = String(m?.mapping_type ?? "").trim();
+    if (mapping_type !== "product" && mapping_type !== "category") {
+      throw new ValidationError(`Mapping #${i + 1}: mapping_type harus "product" atau "category".`);
+    }
+    const ref_id = normalizeRefId(m?.ref_id);
+    if (!ref_id) throw new ValidationError(`Mapping #${i + 1}: produk / kategori target wajib dipilih.`);
+    return { mapping_type, ref_id };
+  });
 
-  return { name, phone, mapping_type, ref_id, active: body?.active === false ? 0 : 1 };
+  return { name, phone, mappings, active: body?.active === false ? 0 : 1 };
 }
 
 /**

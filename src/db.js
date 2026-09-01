@@ -2,10 +2,11 @@
  * Database SQLite (better-sqlite3). Semua query terpusat di file ini.
  *
  * Tabel:
- * - suppliers  : nomor WA tukang sayur + pemetaan ke produk / kategori
- * - outbox     : antrean pesan WA (pola outbox: order tak boleh gagal gara-gara WA)
- * - notify_log : ringkasan tiap order yang masuk (untuk dashboard)
- * - settings   : key-value (mis. nomor admin, nama toko)
+ * - suppliers        : nomor WA tukang sayur
+ * - supplier_mappings: pemetaan supplier → produk / kategori (1 supplier = banyak mapping)
+ * - outbox           : antrean pesan WA (pola outbox: order tak boleh gagal gara-gara WA)
+ * - notify_log       : ringkasan tiap order yang masuk (untuk dashboard)
+ * - settings         : key-value (mis. nomor admin, nama toko)
  */
 import Database from "better-sqlite3";
 import fs from "node:fs";
@@ -19,21 +20,28 @@ const db = new Database(config.dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
+// ---------- Schema ----------
 db.exec(`
 CREATE TABLE IF NOT EXISTS suppliers (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   name         TEXT NOT NULL,
   phone        TEXT NOT NULL,               -- format 628xxx
-  mapping_type TEXT NOT NULL,               -- 'product' | 'category'
-  ref_id       TEXT NOT NULL,               -- id produk atau id kategori
   active       INTEGER DEFAULT 1,
   created_at   TEXT DEFAULT (datetime('now')),
   updated_at   TEXT DEFAULT (datetime('now'))
 );
--- Satu nomor tidak boleh didaftarkan dua kali untuk target yang sama.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_map
-  ON suppliers(mapping_type, ref_id, phone);
-CREATE INDEX IF NOT EXISTS idx_supplier_lookup ON suppliers(active, mapping_type, ref_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_phone ON suppliers(phone);
+
+CREATE TABLE IF NOT EXISTS supplier_mappings (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  supplier_id   INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  mapping_type  TEXT NOT NULL,               -- 'product' | 'category'
+  ref_id        TEXT NOT NULL,               -- id produk atau id kategori
+  created_at    TEXT DEFAULT (datetime('now')),
+  UNIQUE(supplier_id, mapping_type, ref_id)
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_map_lookup ON supplier_mappings(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_map_search ON supplier_mappings(mapping_type, ref_id);
 
 CREATE TABLE IF NOT EXISTS notify_log (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,26 +77,107 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `);
 
+// ---------- Migration: convert old single-mapping suppliers → multi-mapping ----------
+try {
+  const cols = db.prepare(`PRAGMA table_info(suppliers)`).all().map((c) => c.name);
+  if (cols.includes("mapping_type")) {
+    console.log("[DB] Migrasi: memindahkan mapping lama ke supplier_mappings...");
+    const rows = db.prepare(`SELECT id, name, phone, mapping_type, ref_id, active FROM suppliers`).all();
+    const insertMap = db.prepare(
+      `INSERT OR IGNORE INTO supplier_mappings (supplier_id, mapping_type, ref_id) VALUES (?, ?, ?)`
+    );
+    db.pragma("foreign_keys = OFF");  // disable FK so DROP TABLE suppliers doesn't cascade-delete mappings
+    const migrate = db.transaction(() => {
+      for (const r of rows) {
+        if (r.mapping_type && r.ref_id) {
+          insertMap.run(r.id, r.mapping_type, r.ref_id);
+        }
+      }
+      // Recreate table without mapping_type/ref_id (SQLite < 3.35 doesn't support DROP COLUMN)
+      db.exec(`
+        CREATE TABLE suppliers_new (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          name         TEXT NOT NULL,
+          phone        TEXT NOT NULL,
+          active       INTEGER DEFAULT 1,
+          created_at   TEXT DEFAULT (datetime('now')),
+          updated_at   TEXT DEFAULT (datetime('now'))
+        );
+        INSERT INTO suppliers_new (id, name, phone, active, created_at, updated_at)
+          SELECT id, name, phone, active, created_at, updated_at FROM suppliers;
+        DROP TABLE suppliers;
+        ALTER TABLE suppliers_new RENAME TO suppliers;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_phone ON suppliers(phone);
+      `);
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_supplier_map_lookup ON supplier_mappings(supplier_id);
+        CREATE INDEX IF NOT EXISTS idx_supplier_map_search ON supplier_mappings(mapping_type, ref_id);
+      `);
+    });
+    migrate();
+    db.pragma("foreign_keys = ON");  // re-enable FK
+    console.log(`[DB] Migrasi selesai: ${rows.length} supplier dipindahkan.`);
+  }
+} catch (e) {
+  // If migration fails (e.g. fresh DB with no mapping_type), just continue
+  console.warn("[DB] Migration check skipped:", e.message);
+}
+
 const setDefault = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
 setDefault.run("shop_name", "Sayur Sukabumi");
 
 // ---------- Suppliers ----------
 export const supplierQueries = {
   create: db.prepare(
-    `INSERT INTO suppliers (name, phone, mapping_type, ref_id, active)
-     VALUES (@name, @phone, @mapping_type, @ref_id, @active)`
+    `INSERT INTO suppliers (name, phone, active) VALUES (@name, @phone, @active)`
   ),
   update: db.prepare(
-    `UPDATE suppliers SET name=@name, phone=@phone, mapping_type=@mapping_type,
-       ref_id=@ref_id, active=@active, updated_at=datetime('now') WHERE id=@id`
+    `UPDATE suppliers SET name=@name, phone=@phone, active=@active,
+       updated_at=datetime('now') WHERE id=@id`
   ),
   delete: db.prepare(`DELETE FROM suppliers WHERE id = ?`),
   findById: db.prepare(`SELECT * FROM suppliers WHERE id = ?`),
-  all: db.prepare(`SELECT * FROM suppliers ORDER BY mapping_type, name`),
+  findByPhone: db.prepare(`SELECT * FROM suppliers WHERE phone = ?`),
+  all: db.prepare(`SELECT * FROM suppliers ORDER BY name`),
+  allWithMappings: db.prepare(`
+    SELECT s.*,
+      GROUP_CONCAT(sm.mapping_type || ':' || sm.ref_id, '|') AS mappings_raw
+    FROM suppliers s
+    LEFT JOIN supplier_mappings sm ON sm.supplier_id = s.id
+    GROUP BY s.id
+    ORDER BY s.name
+  `),
+};
+
+// ---------- Supplier Mappings ----------
+export const mappingQueries = {
+  insert: db.prepare(
+    `INSERT OR IGNORE INTO supplier_mappings (supplier_id, mapping_type, ref_id)
+     VALUES (@supplier_id, @mapping_type, @ref_id)`
+  ),
+  deleteBySupplier: db.prepare(`DELETE FROM supplier_mappings WHERE supplier_id = ?`),
+  findBySupplier: db.prepare(
+    `SELECT * FROM supplier_mappings WHERE supplier_id = ? ORDER BY mapping_type, ref_id`
+  ),
   activeByMap: db.prepare(
-    `SELECT * FROM suppliers WHERE active = 1 AND mapping_type = ? AND ref_id = ?`
+    `SELECT sm.*, s.name AS supplier_name, s.phone AS supplier_phone
+     FROM supplier_mappings sm
+     JOIN suppliers s ON s.id = sm.supplier_id AND s.active = 1
+     WHERE sm.mapping_type = ? AND sm.ref_id = ?`
   ),
 };
+
+/** Replace all mappings for a supplier (transaction-safe). */
+export const replaceMappings = db.transaction((supplierId, mappings) => {
+  mappingQueries.deleteBySupplier.run(supplierId);
+  for (const m of mappings) {
+    mappingQueries.insert.run({
+      supplier_id: supplierId,
+      mapping_type: m.mapping_type,
+      ref_id: m.ref_id,
+    });
+  }
+});
 
 // ---------- Outbox ----------
 export const outboxQueries = {
