@@ -11,9 +11,7 @@ import * as tpl from "../templates.js";
 export default function waRouter(wa) {
   const router = Router();
 
-  router.get("/status", (req, res) => {
-    res.json(wa.getStatus());
-  });
+  // /status route is now handled in index.js (outside rate limiter)
 
   router.post("/connect", async (req, res, next) => {
     try {

@@ -60,6 +60,7 @@ app.get("/api/health", (req, res) => {
 
 app.use("/api/notify", notifyLimiter, requireToken, notifyRouter());
 app.use("/api/suppliers", adminLimiter, requireToken, suppliersRouter());
+app.get("/api/wa/status", requireToken, (req, res) => res.json(wa.getStatus()));
 app.use("/api/wa", waLimiter, requireToken, waRouter(wa));
 
 app.use((req, res) => res.status(404).json({ error: "Endpoint tidak ditemukan." }));
