@@ -1,0 +1,25 @@
+{
+  "name": "wa-notify",
+  "version": "0.1.0",
+  "description": "Microservice notifikasi WhatsApp: order sayur-v2 diteruskan ke nomor supplier per produk/kategori",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "better-sqlite3": "11.3.0",
+    "cors": "2.8.5",
+    "dotenv": "16.4.5",
+    "express": "4.22.2",
+    "express-rate-limit": "8.6.2",
+    "helmet": "8.3.0",
+    "pino": "8.21.0",
+    "qrcode": "1.5.4",
+    "socket.io": "4.8.0"
+  }
+}
