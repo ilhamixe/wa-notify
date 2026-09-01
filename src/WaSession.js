@@ -290,7 +290,9 @@ export class WaSession {
    */
   async sendText(jid, body) {
     if (!this.isReady()) throw new Error("WhatsApp belum terhubung.");
-    await this.sock.sendMessage(jid, { text: body });
+    const result = await this.sock.sendMessage(jid, { text: body });
+    console.log(`[WA] sendMessage → ${jid} ok=${!!result} id=${result?.key?.id || "none"}`);
+    return result;
   }
 
   /** Daftar grup yang diikuti — kalau mau kirim notif ke grup, bukan personal. */

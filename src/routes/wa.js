@@ -68,5 +68,16 @@ export default function waRouter(wa) {
     }
   });
 
+  router.post("/check-number", async (req, res, next) => {
+    try {
+      const phone = normalizePhone(req.body?.phone);
+      if (!phone) throw new ValidationError("Nomor tidak valid.");
+      const exists = await wa.numberExists(phone);
+      res.json({ phone, exists });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   return router;
 }
