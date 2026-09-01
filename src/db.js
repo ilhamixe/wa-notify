@@ -75,6 +75,22 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS orders (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id      TEXT NOT NULL UNIQUE,
+  customer_name TEXT DEFAULT '',
+  customer_phone TEXT DEFAULT '',
+  address       TEXT DEFAULT '',
+  note          TEXT DEFAULT '',
+  delivery_slot TEXT DEFAULT '',
+  payment_method TEXT DEFAULT '',
+  total         INTEGER DEFAULT 0,
+  status        TEXT DEFAULT 'pending', -- pending|confirmed|preparing|shipping|delivered|cancelled
+  created_at    TEXT DEFAULT (datetime('now')),
+  updated_at    TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 `);
 
 // ---------- Migration: convert old single-mapping suppliers → multi-mapping ----------
@@ -219,6 +235,30 @@ export const notifyLogQueries = {
   ),
   findByOrder: db.prepare(`SELECT * FROM notify_log WHERE order_id = ?`),
   recent: db.prepare(`SELECT * FROM notify_log ORDER BY id DESC LIMIT ?`),
+};
+
+// ---------- Orders ----------
+export const orderQueries = {
+  create: db.prepare(
+    `INSERT INTO orders (order_id, customer_name, customer_phone, address, note, delivery_slot, payment_method, total, status)
+     VALUES (@order_id, @customer_name, @customer_phone, @address, @note, @delivery_slot, @payment_method, @total, @status)`
+  ),
+  findAll: db.prepare(`SELECT * FROM orders ORDER BY id DESC LIMIT ?`),
+  findById: db.prepare(`SELECT * FROM orders WHERE order_id = ?`),
+  updateStatus: db.prepare(
+    `UPDATE orders SET status = @status, updated_at = datetime('now') WHERE order_id = @order_id`
+  ),
+  stats: db.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status='confirmed' THEN 1 ELSE 0 END) AS confirmed,
+      SUM(CASE WHEN status='preparing' THEN 1 ELSE 0 END) AS preparing,
+      SUM(CASE WHEN status='shipping' THEN 1 ELSE 0 END) AS shipping,
+      SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END) AS delivered,
+      SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS cancelled
+    FROM orders
+  `),
 };
 
 // ---------- Settings ----------

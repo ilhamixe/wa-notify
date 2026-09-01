@@ -97,8 +97,11 @@ export function parseOrder(body) {
   const customerName = str(body.customerName, "Nama pelanggan", { max: 60, required: false });
   const customerPhoneRaw = String(body.customerPhone ?? "").trim();
   const customerPhone = customerPhoneRaw ? normalizePhone(customerPhoneRaw) : "";
+  const address = str(body.address, "Alamat", { max: 500, required: false });
   const note = str(body.note, "Catatan", { max: 500, required: false });
   const deliverySlot = str(body.deliverySlot, "Slot antar", { max: 40, required: false });
+  const paymentMethod = str(body.paymentMethod, "Metode pembayaran", { max: 20, required: false });
+  const total = int(body.total ?? 0, "Total", { min: 0, max: 100_000_000 });
 
   if (!Array.isArray(body.items) || body.items.length === 0) {
     throw new ValidationError("Item order kosong.");
@@ -120,7 +123,7 @@ export function parseOrder(body) {
     }
   }
 
-  return { orderId, customerName, customerPhone, note, deliverySlot, items };
+  return { orderId, customerName, customerPhone, address, note, deliverySlot, paymentMethod, total, items };
 }
 
 export const validate = { str, int };
