@@ -39,6 +39,8 @@ export class WaSession {
     this.connecting = false;
     this.reconnectTimer = null;
     this.sessionPath = path.join(config.sessionDir, "shop");
+    /** Callback untuk pesan masuk: async (msg) => void */
+    this.onMessage = null;
   }
 
   getStatus() {
@@ -257,6 +259,17 @@ export class WaSession {
           } else {
             this.setState("error");
             console.log("[WA] terlalu banyak percobaan — scan ulang dari dashboard.");
+          }
+        }
+      });
+
+      sock.ev.on("messages.upsert", ({ messages, type }) => {
+        if (type !== "notify") return;
+        for (const msg of messages) {
+          if (this.onMessage) {
+            this.onMessage(msg).catch((err) =>
+              console.error("[WA] onMessage error:", err?.message || err)
+            );
           }
         }
       });

@@ -22,6 +22,11 @@ import { notifyLimiter, adminLimiter, waLimiter } from "./rateLimit.js";
 import suppliersRouter from "./routes/suppliers.js";
 import notifyRouter from "./routes/notify.js";
 import waRouter from "./routes/wa.js";
+import settingsRouter from "./routes/settings.js";
+import productsRouter from "./routes/products.js";
+import uploadRouter from "./routes/upload.js";
+import vouchersRouter from "./routes/vouchers.js";
+import { handleIncomingMessage } from "./IncomingChat.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -44,6 +49,12 @@ io.on("connection", (socket) => {
   socket.emit("wa-status", wa.getStatus());
 });
 
+// Wire incoming message handler — parse "#ORDER_ID STATUS" dari kurir
+wa.onMessage = (msg) => {
+  const courierPhone = settings.get("courier_phone");
+  return handleIncomingMessage(msg, courierPhone, (jid, text) => wa.sendText(jid, text), emit);
+};
+
 app.set("trust proxy", 1);
 app.use(helmet());
 app.use(cors({ origin: config.allowedOrigins, credentials: true }));
@@ -62,6 +73,10 @@ app.use("/api/notify", notifyLimiter, requireToken, notifyRouter());
 app.use("/api/suppliers", adminLimiter, requireToken, suppliersRouter());
 app.get("/api/wa/status", requireToken, (req, res) => res.json(wa.getStatus()));
 app.use("/api/wa", waLimiter, requireToken, waRouter(wa));
+app.use("/api/settings", adminLimiter, requireToken, settingsRouter());
+app.use("/api/products", productsRouter());
+app.use("/api/vouchers", vouchersRouter());
+app.use("/api/upload", adminLimiter, requireToken, uploadRouter());
 
 app.use((req, res) => res.status(404).json({ error: "Endpoint tidak ditemukan." }));
 app.use(errorHandler);
